@@ -6,10 +6,11 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   std_msgs
   std_srvs
+  behaviortree_cpp_v3
 )
 
 catkin_package(
-  CATKIN_DEPENDS roscpp sensor_msgs std_msgs std_srvs
+  CATKIN_DEPENDS roscpp sensor_msgs std_msgs std_srvs behaviortree_cpp_v3
 )
 
 include_directories(
@@ -17,5 +18,5 @@ include_directories(
 )
 
 #imu_subscriber_node executable
-add_executable(imu_subscriber_node src/main.cpp)
-target_link_libraries(imu_subscriber_node ${catkin_LIBRARIES})
+add_executable(behavior_tree_node src/main3.cpp)
+target_link_libraries(behavior_tree_node ${catkin_LIBRARIES})
