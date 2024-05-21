@@ -1,7 +1,7 @@
 #include <ros/ros.h>
 #include <behaviortree_cpp_v3/bt_factory.h>
 #include <behaviortree_cpp_v3/behavior_tree.h>  
-
+#include <geometry_msgs/Vector3.h>
 #include <sensor_msgs/Imu.h>
 #include <std_msgs/Int32.h>
 #include <std_msgs/Int8.h>
@@ -70,13 +70,13 @@ private:
     ros::Subscriber zValueSubscriber_;
     double currentZValue_;
 
-    void zValueCallback(const sensor_msgs::Imu::ConstPtr& msg);
+    void zValueCallback(const geometry_msgs::Vector3::ConstPtr& msg);
 };
 
 CheckZValuePositive60::CheckZValuePositive60(const std::string& name, const BT::NodeConfiguration& config)
     : BT::SyncActionNode(name, config), currentZValue_(0.0)
 {
-    zValueSubscriber_ = nh_.subscribe("imu_topic", 1, &CheckZValuePositive60::zValueCallback, this);
+    zValueSubscriber_ = nh_.subscribe("angles", 1, &CheckZValuePositive60::zValueCallback, this);
 }
 
 BT::PortsList CheckZValuePositive60::providedPorts()
@@ -98,9 +98,9 @@ BT::NodeStatus CheckZValuePositive60::tick()
     }
 }
 
-void CheckZValuePositive60::zValueCallback(const sensor_msgs::Imu::ConstPtr& msg)
+void CheckZValuePositive60::zValueCallback(const geometry_msgs::Vector3::ConstPtr& msg)
 {
-    currentZValue_ = msg->orientation.z;
+    currentZValue_ = msg->z;
 
     if (currentZValue_ >= 60.0 && currentZValue_ <= 70.0) {
         std::cout << "true" << std::endl;
@@ -197,7 +197,7 @@ BT::NodeStatus TurnOnMotor::tick()
 {
     if (!motorTurnedOn_) {
         std_msgs::Int8 motorDirection;
-        motorDirection.data = 1;
+        motorDirection.data = 2;
         motorDirectionPublisher_.publish(motorDirection);
 
         std::cout << "Published Motor Direction: " << motorDirection.data << std::endl;
@@ -392,7 +392,7 @@ BT::NodeStatus TurnOnMotorOpposite::tick()
 {
     if (!motorTurnedOn_) {
         std_msgs::Int8 motorDirection;
-        motorDirection.data = 2;
+        motorDirection.data =   1;
         motorDirectionPublisher_.publish(motorDirection);
 
         std::cout << "Published Motor Direction: " << motorDirection.data << std::endl;
@@ -433,17 +433,19 @@ int main(int argc, char** argv) {
     ros::Publisher servoPosePublisher = nh.advertise<std_msgs::Int32>("servo_pose", 1);
     motorDirectionPublisher = nh.advertise<std_msgs::Int8>("motor_direction", 1);
     ros::Publisher wireValuePublisher = nh.advertise<std_msgs::Float32>("wire_value", 1);
+    
 
     BT::Blackboard::Ptr blackboard = BT::Blackboard::create();
     blackboard->set("servo_pose_publisher", servoPosePublisher);
     blackboard->set("servo_pose", 255);
     blackboard->set("motor_direction_publisher", motorDirectionPublisher);
 
-    std::vector<std::pair<double, double>> wireValueThresholds = {
+    
+    for(int i = 1; i <= 5; i++)
+    {std::vector<std::pair<double, double>> wireValueThresholds = {
         {0.024, 0.026}, {0.048, 0.054}, {0.072, 0.081}, {0.096, 0.108},
         {0.12, 0.135}, {0.144, 0.162}, {0.168, 0.189}, {0.192, 0.216}
     };
-
     for (int iteration = 1; iteration <= 8; ++iteration) {
         double minThreshold, maxThreshold;
         std::tie(minThreshold, maxThreshold) = wireValueThresholds[iteration - 1];
@@ -485,7 +487,7 @@ int main(int argc, char** argv) {
 
    
     std_msgs::Int8 motorDirectionMsg;
-    motorDirectionMsg.data = 2;
+    motorDirectionMsg.data = 1;
     motorDirectionPublisher.publish(motorDirectionMsg);
     ros::spinOnce(); 
     ros::Duration(1.0).sleep(); 
@@ -506,6 +508,6 @@ int main(int argc, char** argv) {
     }
 
     ros::Duration(5.0).sleep();
-
+    }
     return 0;
 }
