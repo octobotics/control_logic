@@ -1,62 +1,217 @@
 #include <ros/ros.h>
 #include <behaviortree_cpp_v3/bt_factory.h>
-#include <behaviortree_cpp_v3/behavior_tree.h>  
+#include <behaviortree_cpp_v3/behavior_tree.h>
 #include <geometry_msgs/Vector3.h>
 #include <sensor_msgs/Imu.h>
 #include <std_msgs/Int32.h>
 #include <std_msgs/Int8.h>
 #include <std_msgs/Float32.h>
+#include <std_msgs/Bool.h>
+#include <thread>
+#include <chrono>
 using namespace std::chrono;
 
-class SleepNode : public BT::StatefulActionNode
+class CheckZAngleNegative : public BT::SyncActionNode
 {
-  public:
-    SleepNode(const std::string& name, const BT::NodeConfiguration& config)
-      : BT::StatefulActionNode(name, config)
-    {}
+public:
+    CheckZAngleNegative(const std::string& name, const BT::NodeConfiguration& config);
+    static BT::PortsList providedPorts();
+    virtual BT::NodeStatus tick() override;
 
-    static BT::PortsList providedPorts()
-    {
-      
-      return{ BT::InputPort<int>("msec") };
-    }
+private:
+    ros::NodeHandle nh_;
+    ros::Subscriber zValueSubscriber_;
+    double currentZValue_;
 
-    BT::NodeStatus onStart() override
-    {
-      int msec = 0;
-      getInput("msec", msec);
-
-      if( msec <= 0 ) {
-        
-        return BT::NodeStatus::SUCCESS;
-      }
-      else {
-        
-        deadline_ = system_clock::now() + milliseconds(msec);
-        return BT::NodeStatus::RUNNING;
-      }
-    }
-
-   
-    BT::NodeStatus onRunning() override
-    {
-      if ( system_clock::now() >= deadline_ ) {
-        return BT::NodeStatus::SUCCESS;
-      }
-      else {
-        return BT::NodeStatus::RUNNING;
-      }
-    }
-
-    void onHalted() override
-    {
-      // nothing to do here...
-      std::cout << "SleepNode interrupted" << std::endl;
-    }
-
-  private:
-    system_clock::time_point deadline_;
+    void zValueCallback(const geometry_msgs::Vector3::ConstPtr& msg);
 };
+
+CheckZAngleNegative::CheckZAngleNegative(const std::string& name, const BT::NodeConfiguration& config)
+    : BT::SyncActionNode(name, config), currentZValue_(0.0)
+{
+    zValueSubscriber_ = nh_.subscribe("/imu/angles", 1, &CheckZAngleNegative::zValueCallback, this);
+}
+
+BT::PortsList CheckZAngleNegative::providedPorts()
+{
+    return {};
+}
+
+BT::NodeStatus CheckZAngleNegative::tick()
+{
+    if (currentZValue_ >= 300.0 && currentZValue_ <= 310.0) {
+        return BT::NodeStatus::SUCCESS;
+    } else {
+        return BT::NodeStatus::FAILURE;
+    }
+}
+
+void CheckZAngleNegative::zValueCallback(const geometry_msgs::Vector3::ConstPtr& msg)
+{
+    currentZValue_ = msg->y;
+
+    if (currentZValue_ >= 300.0 && currentZValue_ <= 310.0) {
+        std::cout << "true" << std::endl;
+    }
+}
+
+class ActiveAuto : public BT::SyncActionNode
+{
+public:
+    ActiveAuto(const std::string& name, const BT::NodeConfiguration& config);
+    static BT::PortsList providedPorts();
+    virtual BT::NodeStatus tick() override;
+
+private:
+    ros::Publisher activatePublisher_;
+};
+
+ActiveAuto::ActiveAuto(const std::string& name, const BT::NodeConfiguration& config)
+    : BT::SyncActionNode(name, config)
+{
+    activatePublisher_ = config.blackboard->template get<ros::Publisher>("activate_publisher");
+}
+
+BT::PortsList ActiveAuto::providedPorts()
+{
+    return {};
+}
+
+BT::NodeStatus ActiveAuto::tick()
+{
+    std_msgs::Int8 activateMsg;
+    activateMsg.data = 1;
+    activatePublisher_.publish(activateMsg);
+    std::cout << "Published Activate: " << activateMsg.data << std::endl;
+    return BT::NodeStatus::SUCCESS;
+}
+
+// ActivateStop Node
+class ActivateStop : public BT::SyncActionNode
+{
+public:
+    ActivateStop(const std::string& name, const BT::NodeConfiguration& config);
+    static BT::PortsList providedPorts();
+    virtual BT::NodeStatus tick() override;
+
+private:
+    ros::Publisher activatePublisher_;
+};
+
+ActivateStop::ActivateStop(const std::string& name, const BT::NodeConfiguration& config)
+    : BT::SyncActionNode(name, config)
+{
+    activatePublisher_ = config.blackboard->template get<ros::Publisher>("activate_publisher");
+}
+
+BT::PortsList ActivateStop::providedPorts()
+{
+    return {};
+}
+
+BT::NodeStatus ActivateStop::tick()
+{
+    std_msgs::Int8 activateMsg;
+    activateMsg.data = 0;
+    activatePublisher_.publish(activateMsg);
+    std::cout << "Published Activate: " << activateMsg.data << std::endl;
+    return BT::NodeStatus::SUCCESS;
+}
+
+// ActivateReverse Node
+class ActivateReverse : public BT::SyncActionNode
+{
+public:
+    ActivateReverse(const std::string& name, const BT::NodeConfiguration& config);
+    static BT::PortsList providedPorts();
+    virtual BT::NodeStatus tick() override;
+
+private:
+    ros::Publisher activatePublisher_;
+};
+
+ActivateReverse::ActivateReverse(const std::string& name, const BT::NodeConfiguration& config)
+    : BT::SyncActionNode(name, config)
+{
+    activatePublisher_ = config.blackboard->template get<ros::Publisher>("activate_publisher");
+}
+
+BT::PortsList ActivateReverse::providedPorts()
+{
+    return {};
+}
+
+BT::NodeStatus ActivateReverse::tick()
+{
+    std_msgs::Int8 activateMsg;
+    activateMsg.data = 2;
+    activatePublisher_.publish(activateMsg);
+    std::cout << "Published Activate: " << activateMsg.data << std::endl;
+    return BT::NodeStatus::SUCCESS;
+}
+
+// Sleep Node
+class Sleep : public BT::SyncActionNode
+{
+public:
+    Sleep(const std::string& name, const BT::NodeConfiguration& config);
+    static BT::PortsList providedPorts();
+    virtual BT::NodeStatus tick() override;
+};
+
+Sleep::Sleep(const std::string& name, const BT::NodeConfiguration& config)
+    : BT::SyncActionNode(name, config)
+{
+}
+
+BT::PortsList Sleep::providedPorts()
+{
+    return { BT::InputPort<int>("duration") };
+}
+
+BT::NodeStatus Sleep::tick()
+{
+    int duration;
+    if (!getInput<int>("duration", duration)) {
+        throw BT::RuntimeError("Missing parameter [duration] in Sleep");
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(duration));
+    std::cout << "Slept for: " << duration << " seconds" << std::endl;
+    return BT::NodeStatus::SUCCESS;
+}
+
+// LateralShift Node
+class LateralShift : public BT::SyncActionNode
+{
+public:
+    LateralShift(const std::string& name, const BT::NodeConfiguration& config);
+    static BT::PortsList providedPorts();
+    virtual BT::NodeStatus tick() override;
+
+private:
+    ros::Publisher lateralShiftPublisher_;
+};
+
+LateralShift::LateralShift(const std::string& name, const BT::NodeConfiguration& config)
+    : BT::SyncActionNode(name, config)
+{
+    lateralShiftPublisher_ = config.blackboard->template get<ros::Publisher>("lateral_shift_publisher");
+}
+
+BT::PortsList LateralShift::providedPorts()
+{
+    return {};
+}
+
+BT::NodeStatus LateralShift::tick()
+{
+    std_msgs::Int8 shiftMsg;
+    shiftMsg.data = 1;
+    lateralShiftPublisher_.publish(shiftMsg);
+    std::cout << "Published Lateral Shift: " << shiftMsg.data << std::endl;
+    return BT::NodeStatus::SUCCESS;
+}
 
 class CheckZValuePositive60 : public BT::SyncActionNode
 {
@@ -76,7 +231,7 @@ private:
 CheckZValuePositive60::CheckZValuePositive60(const std::string& name, const BT::NodeConfiguration& config)
     : BT::SyncActionNode(name, config), currentZValue_(0.0)
 {
-    zValueSubscriber_ = nh_.subscribe("angles", 1, &CheckZValuePositive60::zValueCallback, this);
+    zValueSubscriber_ = nh_.subscribe("/imu/angles", 1, &CheckZValuePositive60::zValueCallback, this);
 }
 
 BT::PortsList CheckZValuePositive60::providedPorts()
@@ -100,7 +255,7 @@ BT::NodeStatus CheckZValuePositive60::tick()
 
 void CheckZValuePositive60::zValueCallback(const geometry_msgs::Vector3::ConstPtr& msg)
 {
-    currentZValue_ = msg->z;
+    currentZValue_ = msg->y;
 
     if (currentZValue_ >= 60.0 && currentZValue_ <= 70.0) {
         std::cout << "true" << std::endl;
@@ -334,6 +489,9 @@ BT::PortsList IncreaseLinearActuatorAction::providedPorts()
     return { BT::InputPort<int>("value") };
 }
 
+
+          
+
 BT::NodeStatus IncreaseLinearActuatorAction::tick()
 {
     if (increasePerformed_) {
@@ -424,21 +582,30 @@ int main(int argc, char** argv) {
 
     BT::BehaviorTreeFactory factory;
     factory.registerNodeType<CheckZValuePositive60>("CheckZValuePositive60");
+    factory.registerNodeType<CheckZAngleNegative>("CheckZAngleNegative");
     factory.registerNodeType<ReduceLinearActuatorAction>("ReduceLinearActuatorAction");
     factory.registerNodeType<TurnOnMotor>("TurnOnMotor");
     factory.registerNodeType<CheckWireValue>("CheckWireValue");
     factory.registerNodeType<TurnOffMotor>("TurnOffMotor");
     factory.registerNodeType<IncreaseLinearActuatorAction>("IncreaseLinearActuatorAction");
+    factory.registerNodeType<ActiveAuto>("ActiveAuto");
+    factory.registerNodeType<ActivateStop>("ActivateStop");
+    factory.registerNodeType<ActivateReverse>("ActivateReverse");
+    factory.registerNodeType<Sleep>("Sleep");
+    factory.registerNodeType<LateralShift>("LateralShift");
 
     ros::Publisher servoPosePublisher = nh.advertise<std_msgs::Int32>("servo_pose", 1);
-    motorDirectionPublisher = nh.advertise<std_msgs::Int8>("motor_direction", 1);
+    ros::Publisher motorDirectionPublisher = nh.advertise<std_msgs::Int8>("motor_direction", 1);
+    ros::Publisher activatePublisher = nh.advertise<std_msgs::Int8>("activate", 1);
+    ros::Publisher lateralShiftPublisher = nh.advertise<std_msgs::Int8>("lateral_shift", 1);
     ros::Publisher wireValuePublisher = nh.advertise<std_msgs::Float32>("wire_value", 1);
-    
 
     BT::Blackboard::Ptr blackboard = BT::Blackboard::create();
     blackboard->set("servo_pose_publisher", servoPosePublisher);
     blackboard->set("servo_pose", 255);
     blackboard->set("motor_direction_publisher", motorDirectionPublisher);
+    blackboard->set("activate_publisher", activatePublisher);
+    blackboard->set("lateral_shift_publisher", lateralShiftPublisher);
 
     
     for(int i = 1; i <= 5; i++)
@@ -457,14 +624,19 @@ int main(int argc, char** argv) {
         std::string xml_text = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                             "<root BTCPP_format=\"3\">"
                             "  <BehaviorTree ID=\"ReactiveBehaviorTree\">"
-                            "    <ReactiveSequence>"
-                            "      <CheckZValuePositive60 min=\"60\"/>"
+                            "    <Sequence>"
+                            "      <CheckZAngleNegative/>"
+                            "      <ActivateStop/>"
                             "      <ReduceLinearActuatorAction value=\"-25\"/>"
+                            "      <Sleep duration=\"5\"/>"
                             "      <TurnOnMotor/>"
                             "      <CheckWireValue/>"
                             "      <TurnOffMotor/>"
                             "      <IncreaseLinearActuatorAction value=\"25\"/>"
-                            "    </ReactiveSequence>"
+                            "      <Sleep duration=\"5\"/>"
+                            "      <ActivateReverse/>"
+                            "      <Sleep duration=\"5\"/>"
+                            "    </Sequence>"
                             "  </BehaviorTree>"
                             "</root>";
 
