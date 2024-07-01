@@ -13,6 +13,11 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <cstdlib>
+#include <csignal>
+#include <unistd.h>  // For getuid() and getpwuid()
+#include <pwd.h>     // For getpwuid()
+
 
 using namespace std::chrono;
 
@@ -80,7 +85,7 @@ BT::PortsList CheckZValuePositive60::providedPorts()
 void CheckZValuePositive60::reset()
 {
     status_ = BT::NodeStatus::FAILURE;
-    currentZValue_ = 0.0; // Ensure Z value is reset
+    currentZValue_ = 0.0; 
 }
 
 BT::NodeStatus CheckZValuePositive60::tick()
@@ -90,7 +95,7 @@ BT::NodeStatus CheckZValuePositive60::tick()
         throw BT::RuntimeError("Missing parameter [min] in CheckZValuePositive60");
     }
 
-    if (currentZValue_ >= 60.0 && currentZValue_ <= 70.0) {
+    if ((currentZValue_ >= 60.0 && currentZValue_ <= 70.0) || (currentZValue_ >= 290.0 && currentZValue_ <= 300.0)) {
         std::cout << "executed zed" << std::endl;
         status_ = BT::NodeStatus::SUCCESS;
     } else {
@@ -511,14 +516,47 @@ void wireValueCallback(const std_msgs::Float32::ConstPtr& msg)
         std_msgs::Int8 motorDirectionMsg;
         motorDirectionMsg.data = 0;
         motorDirectionPublisher.publish(motorDirectionMsg);
-        ros::spinOnce();
+        //ros::spinOnce();
     }
+}
+
+void signal_handler(int signal) 
+{
+    if (signal == SIGABRT)
+        std::cerr << "SIGABRT received\n";
+    else
+        std::cerr << "Unexpected signal " << signal << " received\n";
+    std::_Exit(EXIT_FAILURE);
+}
+
+
+bool terminateCallback(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res)
+{
+    res.success = true;
+    auto previous_handler = std::signal(SIGABRT, signal_handler);
+    if (previous_handler == SIG_ERR)
+    {
+        std::cerr << "Setup failed\n";
+        return EXIT_FAILURE;
+    }
+ 
+    std::abort(); // Raise SIGABRT
+    std::cout << "This code is unreachable\n"; 
+    return true;
+    
+}
+
+std::string getHomeDirectory() {
+    struct passwd *pw = getpwuid(getuid());
+    return std::string(pw->pw_dir);
 }
 
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "behavior_tree_node");
     ros::NodeHandle nh;
+    ros::AsyncSpinner spinner(1);
+    spinner.start();
 
     BT::BehaviorTreeFactory factory;
     factory.registerNodeType<CheckZValuePositive60>("CheckZValuePositive60");
@@ -537,6 +575,8 @@ int main(int argc, char** argv)
     servoPosePublisher = nh.advertise<std_msgs::Int32>("servo_pose", 1);
     ros::Publisher wireValuePublisher = nh.advertise<std_msgs::Float32>("wire_value", 1);
     ros::Publisher activatePublisher = nh.advertise<std_msgs::Int32>("navigation_control", 1);
+    ros::Publisher lateralShiftPublisher = nh.advertise<std_msgs::Int32>("/lateral_shift", 1);
+    ros::ServiceServer terminateService = nh.advertiseService("terminate_program", terminateCallback);
 
     BT::Blackboard::Ptr blackboard = BT::Blackboard::create();
     blackboard->set("servo_pose_publisher", servoPosePublisher);
@@ -547,65 +587,60 @@ int main(int argc, char** argv)
     int cycle1 = 0;
     int cycle2 = 0;
 
-     std::string xml_text = R"(
-                    <root BTCPP_format="3">
-                    <BehaviorTree ID="ReactiveBehaviorTree">
-                        <Repeat num_cycles="7">
-                        <Sequence>
-                            <Sleep duration="5"/>
-                            <CheckZValuePositive60 min="60"/>
-                            <Sleep duration="5"/>
-                            <ActivateStop/>
-                            <Sleep duration="5"/>
-                            <ReduceLinearActuatorAction value="-25"/>
-                            <Sleep duration="5"/>
-                            <TurnOnMotor/>
-                            <Sleep duration="5"/>
-                            <IncreaseLinearActuatorAction value="25"/>
-                            <Sleep duration="5"/>
-                            <ActivateReverse/>
-                            <Sleep duration="5"/>
-                        </Sequence>
-                        </Repeat>
-                    </BehaviorTree>
-                    </root>)";
+    std::string xml_text = R"(
+        <root BTCPP_format="3">
+        <BehaviorTree ID="ReactiveBehaviorTree">
+            <Sequence>
+            <RetryUntilSuccessful num_attempts="10000">
+                <CheckZValuePositive60 min="60"/>
+            </RetryUntilSuccessful>    
+                <Sleep duration="1"/>
+                <ActivateStop/>
+                <Sleep duration="5"/>
+                <ReduceLinearActuatorAction value="-25"/>
+                <Sleep duration="5"/>
+                <TurnOnMotor/>
+                <Sleep duration="5"/>
+                <IncreaseLinearActuatorAction value="25"/>
+                <Sleep duration="5"/>
+                <ActivateReverse/>
+                <Sleep duration="5"/>
+            </Sequence>
+        </BehaviorTree>
+        </root>)";
 
-    std::cout << "Loaded XML:\n"
-                  << xml_text << std::endl;
+    std::cout << "Loaded XML:\n" << xml_text << std::endl;
 
     auto tree = factory.createTreeFromText(xml_text, blackboard);
 
     ros::Rate rate(1);
-    int cycle_count = 0;
     int tick_count = 0;
+    int success_count = 0;
+    const int desired_success_count = 7;
 
-    while (ros::ok()) {
+    while (success_count < desired_success_count)
+    {
         BT::NodeStatus status = tree.tickRoot();
-        ros::spinOnce();
         rate.sleep();
         tick_count++;
 
-        std::cout << "Tick count: " << tick_count << " | Cycle count: " << cycle_count << " | Status: " << BT::toStr(status) << std::endl;
+        std::cout << "Tick count: " << tick_count << " | Success count: " << success_count << " | Status: " << BT::toStr(status) << std::endl;
 
-        if (status == BT::NodeStatus::IDLE || status == BT::NodeStatus::SUCCESS) {
-            cycle_count++;
+        if (status == BT::NodeStatus::SUCCESS)
+        {
+            success_count++;
             tree.rootNode()->halt();
         }
-
-        if (tick_count >= 2 && status == BT::NodeStatus::SUCCESS) {
-            break;
-        }
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
     std::cout << "Behavior Tree execution completed after " << tick_count << " cycles." << std::endl;
-
-    
 
     ros::Duration(1.0).sleep();
 
     ros::Subscriber wireValueSub = nh.subscribe("/wire_value", 1, wireValueCallback);
 
-    
     std_msgs::Int32 navigationControlMsg;
     navigationControlMsg.data = 0;
     activatePublisher.publish(navigationControlMsg);
@@ -619,22 +654,82 @@ int main(int argc, char** argv)
     std_msgs::Int8 motorDirectionMsg;
     motorDirectionMsg.data = 2;
     motorDirectionPublisher.publish(motorDirectionMsg);
-    ros::spinOnce();
     ros::Duration(1.0).sleep();
 
     while (ros::ok()) {
-        ros::spinOnce();
         ros::Duration(1.0).sleep();
 
         if (wireValueMsg.data < 0.022) {
             motorDirectionMsg.data = 0;
             motorDirectionPublisher.publish(motorDirectionMsg);
-            ros::spinOnce();
             break;
         }
     }
 
     ros::Duration(5.0).sleep();
+    int cnt = 0;
 
+    int bash_script_result;
+    std::string homeDirectory;
+    std::string scriptPath;
+
+    if (cnt == 0) {
+        homeDirectory = getHomeDirectory();
+        scriptPath = homeDirectory + "/lateral_shift.sh";
+
+        //bash_script_result = std::system(scriptPath.c_str());
+
+        system("bash /home/octobotics/lateral_shift.sh &");
+
+        ros::Duration(5.0).sleep();
+
+        std_msgs::Int32 lateralShiftMsg;
+        lateralShiftMsg.data = 1;
+        std::cout << "Publishing lateral shift message with data: " << lateralShiftMsg.data << std::endl;
+        lateralShiftPublisher.publish(lateralShiftMsg);
+
+        ros::Duration(50.0).sleep();
+
+        std::system("rosnode kill lateral_shift_controller");
+        
+    } else {
+        homeDirectory = getHomeDirectory();
+        scriptPath = homeDirectory + "/lateral_shift.sh";
+
+        //bash_script_result = std::system(scriptPath.c_str());
+
+        system("bash /home/octobotics/lateral_shift.sh &");
+
+        ros::Duration(5.0).sleep();
+
+        std_msgs::Int32 lateralShiftMsg;
+        lateralShiftMsg.data = 1;
+        std::cout << "Publishing lateral shift message with data: " << lateralShiftMsg.data << std::endl;
+        lateralShiftPublisher.publish(lateralShiftMsg);
+
+        ros::Duration(2.0).sleep();
+
+        std::system("rosnode kill lateral_shift_controller");
+
+        ros::Duration(3.0).sleep();
+
+        scriptPath = homeDirectory + "/lateral_shift.sh";
+
+        bash_script_result = std::system(scriptPath.c_str());
+
+        ros::Duration(2.0).sleep();
+
+        lateralShiftMsg.data = 1;
+        std::cout << "Publishing lateral shift message with data: " << lateralShiftMsg.data << std::endl;
+        lateralShiftPublisher.publish(lateralShiftMsg);
+
+        ros::Duration(50.0).sleep();
+
+        std::system("rosnode kill lateral_shift_controller");
+    }
+    cnt++;
+
+    spinner.stop();
+    ros::shutdown();
     return 0;
 }
