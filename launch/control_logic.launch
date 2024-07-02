@@ -1,0 +1,6 @@
+<launch>
+    
+    <node pkg="control_logic" type="behavior_tree_node" name="behavior_tree_node" output="screen">
+
+    </node>
+  </launch>
