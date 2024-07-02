@@ -586,7 +586,18 @@ int main(int argc, char** argv)
 
     int cycle1 = 0;
     int cycle2 = 0;
-
+    int cnt = 0;
+    int cnnnt = 0;
+    while (ros::ok())
+    {
+    if(cnnnt > 0)
+    {
+    std_msgs::Int32 navigationControlMsg;
+    navigationControlMsg.data = 1;
+    activatePublisher.publish(navigationControlMsg);
+    }
+    ros::Duration(5.0).sleep();
+    
     std::string xml_text = R"(
         <root BTCPP_format="3">
         <BehaviorTree ID="ReactiveBehaviorTree">
@@ -637,7 +648,7 @@ int main(int argc, char** argv)
 
     std::cout << "Behavior Tree execution completed after " << tick_count << " cycles." << std::endl;
 
-    ros::Duration(1.0).sleep();
+    ros::Duration(5.0).sleep();
 
     ros::Subscriber wireValueSub = nh.subscribe("/wire_value", 1, wireValueCallback);
 
@@ -667,7 +678,7 @@ int main(int argc, char** argv)
     }
 
     ros::Duration(5.0).sleep();
-    int cnt = 0;
+    
 
     int bash_script_result;
     std::string homeDirectory;
@@ -715,9 +726,11 @@ int main(int argc, char** argv)
 
         scriptPath = homeDirectory + "/lateral_shift.sh";
 
-        bash_script_result = std::system(scriptPath.c_str());
+        //bash_script_result = std::system(scriptPath.c_str());
 
-        ros::Duration(2.0).sleep();
+        system("bash /home/octobotics/lateral_shift.sh &");
+
+        ros::Duration(5.0).sleep();
 
         lateralShiftMsg.data = 1;
         std::cout << "Publishing lateral shift message with data: " << lateralShiftMsg.data << std::endl;
@@ -728,7 +741,8 @@ int main(int argc, char** argv)
         std::system("rosnode kill lateral_shift_controller");
     }
     cnt++;
-
+    cnnnt++;
+    }
     spinner.stop();
     ros::shutdown();
     return 0;
