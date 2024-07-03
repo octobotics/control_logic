@@ -690,7 +690,7 @@ int main(int argc, char** argv)
 
         //bash_script_result = std::system(scriptPath.c_str());
 
-        system("bash /home/octobotics/lateral_shift.sh &");
+        system("bash ~/lateral_shift.sh &");
 
         ros::Duration(5.0).sleep();
 
@@ -709,7 +709,7 @@ int main(int argc, char** argv)
 
         //bash_script_result = std::system(scriptPath.c_str());
 
-        system("bash /home/octobotics/lateral_shift.sh &");
+        system("bash ~/lateral_shift.sh &");
 
         ros::Duration(5.0).sleep();
 
@@ -728,7 +728,7 @@ int main(int argc, char** argv)
 
         //bash_script_result = std::system(scriptPath.c_str());
 
-        system("bash /home/octobotics/lateral_shift.sh &");
+        system("bash ~/lateral_shift.sh &");
 
         ros::Duration(5.0).sleep();
 
