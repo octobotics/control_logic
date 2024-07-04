@@ -21,6 +21,19 @@
 
 using namespace std::chrono;
 
+std_msgs::Float32 positiveAngle; 
+std_msgs::Float32 negativeAngle; 
+
+void positiveAngleCallback(const std_msgs::Float32::ConstPtr& msg)
+{
+    positiveAngle = *msg;
+}
+
+void negativeAngleCallback(const std_msgs::Float32::ConstPtr& msg)
+{
+    negativeAngle = *msg;
+}
+
 class Sleep : public BT::SyncActionNode
 {
 public:
@@ -52,6 +65,7 @@ BT::NodeStatus Sleep::tick()
    std::cout << "Sleep for:" << duration_ << "seconds" << std::endl;
    return BT::NodeStatus::SUCCESS;
 }
+
 
 class CheckZValuePositive60 : public BT::ConditionNode
 {
@@ -90,12 +104,11 @@ void CheckZValuePositive60::reset()
 
 BT::NodeStatus CheckZValuePositive60::tick()
 {
-    double min;
-    if (!getInput<double>("min", min)) {
-        throw BT::RuntimeError("Missing parameter [min] in CheckZValuePositive60");
-    }
+    double minPositive = positiveAngle.data;
+    double minNegative = negativeAngle.data;
 
-    if ((currentZValue_ >= 60.0 && currentZValue_ <= 70.0) || (currentZValue_ >= 290.0 && currentZValue_ <= 300.0)) {
+    if ((currentZValue_ >= minPositive && currentZValue_ <= minPositive + 10.0) || 
+        (currentZValue_ >= minNegative && currentZValue_ <= minNegative + 10.0)) {
         std::cout << "executed zed" << std::endl;
         status_ = BT::NodeStatus::SUCCESS;
     } else {
@@ -109,6 +122,7 @@ void CheckZValuePositive60::zValueCallback(const geometry_msgs::Vector3::ConstPt
 {
     currentZValue_ = msg->y;
 }
+
 class ReduceLinearActuatorAction : public BT::SyncActionNode
 {
 public:
@@ -570,6 +584,12 @@ int main(int argc, char** argv)
     factory.registerNodeType<ActivateReverse>("ActivateReverse");
     factory.registerNodeType<Sleep>("Sleep");
 
+    
+    ros::Subscriber positiveAngleSubscriber = nh.subscribe("positive_angle", 10, positiveAngleCallback);
+    ros::Subscriber negativeAngleSubscriber = nh.subscribe("negative_angle", 10, negativeAngleCallback);
+    ros::Publisher positiveAnglePublisher = nh.advertise<std_msgs::Float32>("positive_angle", 1);
+    ros::Publisher negativeAnglePublisher = nh.advertise<std_msgs::Float32>("negative_angle", 1);
+
     ros::Publisher servoPosePublisher = nh.advertise<std_msgs::Int32>("servo_pose", 1);
     motorDirectionPublisher = nh.advertise<std_msgs::Int8>("motor_direction", 1);
     servoPosePublisher = nh.advertise<std_msgs::Int32>("servo_pose", 1);
@@ -583,6 +603,14 @@ int main(int argc, char** argv)
     blackboard->set("servo_pose", 255);
     blackboard->set("motor_direction_publisher", motorDirectionPublisher);
     blackboard->set("navigation_control", activatePublisher);
+
+    std_msgs::Float32 positiveAngleControlMsg;
+    positiveAngleControlMsg.data = 60;
+    positiveAnglePublisher.publish(positiveAngleControlMsg);
+
+    std_msgs::Float32 negativeAngleControlMsg;
+    negativeAngleControlMsg.data = 290;
+    negativeAnglePublisher.publish(negativeAngleControlMsg);
 
     int cycle1 = 0;
     int cycle2 = 0;
