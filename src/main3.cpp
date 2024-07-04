@@ -584,11 +584,13 @@ int main(int argc, char** argv)
     factory.registerNodeType<ActivateReverse>("ActivateReverse");
     factory.registerNodeType<Sleep>("Sleep");
 
-    
+
+    positiveAngle.data = 60.0;
+    negativeAngle.data = 290.0;
     ros::Subscriber positiveAngleSubscriber = nh.subscribe("positive_angle", 10, positiveAngleCallback);
     ros::Subscriber negativeAngleSubscriber = nh.subscribe("negative_angle", 10, negativeAngleCallback);
-    ros::Publisher positiveAnglePublisher = nh.advertise<std_msgs::Float32>("positive_angle", 1);
-    ros::Publisher negativeAnglePublisher = nh.advertise<std_msgs::Float32>("negative_angle", 1);
+    // ros::Publisher positiveAnglePublisher = nh.advertise<std_msgs::Float32>("positive_angle", 1);
+    // ros::Publisher negativeAnglePublisher = nh.advertise<std_msgs::Float32>("negative_angle", 1);
 
     ros::Publisher servoPosePublisher = nh.advertise<std_msgs::Int32>("servo_pose", 1);
     motorDirectionPublisher = nh.advertise<std_msgs::Int8>("motor_direction", 1);
@@ -604,13 +606,13 @@ int main(int argc, char** argv)
     blackboard->set("motor_direction_publisher", motorDirectionPublisher);
     blackboard->set("navigation_control", activatePublisher);
 
-    std_msgs::Float32 positiveAngleControlMsg;
-    positiveAngleControlMsg.data = 60;
-    positiveAnglePublisher.publish(positiveAngleControlMsg);
+    // std_msgs::Float32 positiveAngleControlMsg;
+    // positiveAngleControlMsg.data = 60;
+    // positiveAnglePublisher.publish(positiveAngleControlMsg);
 
-    std_msgs::Float32 negativeAngleControlMsg;
-    negativeAngleControlMsg.data = 290;
-    negativeAnglePublisher.publish(negativeAngleControlMsg);
+    // std_msgs::Float32 negativeAngleControlMsg;
+    // negativeAngleControlMsg.data = 290;
+    // negativeAnglePublisher.publish(negativeAngleControlMsg);
 
     int cycle1 = 0;
     int cycle2 = 0;
