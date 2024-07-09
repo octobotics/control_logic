@@ -16,7 +16,9 @@
 #include <cstdlib>
 #include <csignal>
 #include <unistd.h>  // For getuid() and getpwuid()
-#include <pwd.h>     // For getpwuid()
+#include <pwd.h>
+#include <geometry_msgs/Vector3.h>
+#include <std_msgs/Float64.h>     // For getpwuid()
 
 
 using namespace std::chrono;
@@ -81,12 +83,13 @@ private:
     ros::Subscriber zValueSubscriber_;
     double currentZValue_;
     BT::NodeStatus status_;
+    int counter_;
 
     void zValueCallback(const geometry_msgs::Vector3::ConstPtr& msg);
 };
 
 CheckZValuePositive60::CheckZValuePositive60(const std::string& name, const BT::NodeConfiguration& config)
-    : BT::ConditionNode(name, config), currentZValue_(0.0), status_(BT::NodeStatus::FAILURE)
+    : BT::ConditionNode(name, config), currentZValue_(0.0), status_(BT::NodeStatus::FAILURE), counter_(0)
 {
     zValueSubscriber_ = nh_.subscribe("/imu/angles", 1, &CheckZValuePositive60::zValueCallback, this);
 }
@@ -100,6 +103,7 @@ void CheckZValuePositive60::reset()
 {
     status_ = BT::NodeStatus::FAILURE;
     currentZValue_ = 0.0; 
+    counter_ = 1;
 }
 
 BT::NodeStatus CheckZValuePositive60::tick()
@@ -107,14 +111,25 @@ BT::NodeStatus CheckZValuePositive60::tick()
     double minPositive = positiveAngle.data;
     double minNegative = negativeAngle.data;
 
-    if ((currentZValue_ >= minPositive && currentZValue_ <= minPositive + 10.0) || 
-        (currentZValue_ >= minNegative && currentZValue_ <= minNegative + 10.0)) {
-        std::cout << "executed zed" << std::endl;
-        status_ = BT::NodeStatus::SUCCESS;
+    if (counter_ % 2 != 0) {
+        
+        if (currentZValue_ >= minPositive && currentZValue_ <= minPositive + 10.0) {
+            std::cout << "executed zed" << std::endl;
+            status_ = BT::NodeStatus::SUCCESS;
+        } else {
+            status_ = BT::NodeStatus::FAILURE;
+        }
     } else {
-        status_ = BT::NodeStatus::FAILURE;
+       
+        if (currentZValue_ >= minNegative && currentZValue_ <= minNegative + 10.0) {
+            std::cout << "executed zed" << std::endl;
+            status_ = BT::NodeStatus::SUCCESS;
+        } else {
+            status_ = BT::NodeStatus::FAILURE;
+        }
     }
 
+    counter_++;
     return status_;
 }
 
@@ -131,15 +146,22 @@ public:
     virtual BT::NodeStatus tick() override;
 
 private:
+    void servoPoseCallback(const std_msgs::Int32::ConstPtr& msg);
+
     ros::Publisher servoPosePublisher_;
+    ros::Subscriber servoPoseSubscriber_;
     BT::Blackboard::Ptr blackboard_;
+    int currentServoPose_;  
 };
 
 ReduceLinearActuatorAction::ReduceLinearActuatorAction(const std::string& name, const BT::NodeConfiguration& config)
-    : BT::SyncActionNode(name, config)
+    : BT::SyncActionNode(name, config), currentServoPose_(0)  
 {
+    ros::NodeHandle nh;  
     servoPosePublisher_ = config.blackboard->template get<ros::Publisher>("servo_pose_publisher");
     blackboard_ = config.blackboard;
+    
+    servoPoseSubscriber_ = nh.subscribe("/current_servo_pose", 10, &ReduceLinearActuatorAction::servoPoseCallback, this);
 }
 
 BT::PortsList ReduceLinearActuatorAction::providedPorts()
@@ -147,21 +169,21 @@ BT::PortsList ReduceLinearActuatorAction::providedPorts()
     return { BT::InputPort<int>("value") };
 }
 
+void ReduceLinearActuatorAction::servoPoseCallback(const std_msgs::Int32::ConstPtr& msg)
+{
+    currentServoPose_ = msg->data;  
+}
+
 BT::NodeStatus ReduceLinearActuatorAction::tick()
 {
     std::cout << "Executing ReduceLinearActuatorAction" << std::endl;
-
-    int currentServoPose;
-    if (!blackboard_->get("servo_pose", currentServoPose)) {
-        throw BT::RuntimeError("Failed to get current servo_pose value");
-    }
 
     int reductionValue;
     if (!getInput<int>("value", reductionValue)) {
         throw BT::RuntimeError("Missing parameter [value] in ReduceLinearActuatorAction");
     }
 
-    int newServoPose = 65;
+    int newServoPose = currentServoPose_ - 25;  
 
     std_msgs::Int32 reducedValue;
     reducedValue.data = newServoPose;
@@ -173,7 +195,6 @@ BT::NodeStatus ReduceLinearActuatorAction::tick()
 
     return BT::NodeStatus::SUCCESS;
 }
-
 class TurnOnMotor : public BT::SyncActionNode
 {
 public:
@@ -316,15 +337,22 @@ public:
     virtual BT::NodeStatus tick() override;
 
 private:
+    void servoPoseCallback(const std_msgs::Int32::ConstPtr& msg);
+
     ros::Publisher servoPosePublisher_;
+    ros::Subscriber servoPoseSubscriber_;
     BT::Blackboard::Ptr blackboard_;
+    int currentServoPose_;  
 };
 
 IncreaseLinearActuatorAction::IncreaseLinearActuatorAction(const std::string& name, const BT::NodeConfiguration& config)
-    : BT::SyncActionNode(name, config)
+    : BT::SyncActionNode(name, config), currentServoPose_(0)  
 {
+    ros::NodeHandle nh;  
     servoPosePublisher_ = config.blackboard->template get<ros::Publisher>("servo_pose_publisher");
     blackboard_ = config.blackboard;
+   
+    servoPoseSubscriber_ = nh.subscribe("/current_servo_pose", 10, &IncreaseLinearActuatorAction::servoPoseCallback, this);
 }
 
 BT::PortsList IncreaseLinearActuatorAction::providedPorts()
@@ -332,21 +360,21 @@ BT::PortsList IncreaseLinearActuatorAction::providedPorts()
     return { BT::InputPort<int>("value") };
 }
 
+void IncreaseLinearActuatorAction::servoPoseCallback(const std_msgs::Int32::ConstPtr& msg)
+{
+    currentServoPose_ = msg->data; 
+}
+
 BT::NodeStatus IncreaseLinearActuatorAction::tick()
 {
     std::cout << "Executing IncreaseLinearActuatorAction" << std::endl;
-
-    int currentServoPose;
-    if (!blackboard_->get("servo_pose", currentServoPose)) {
-        throw BT::RuntimeError("Failed to get current servo_pose value");
-    }
 
     int increaseValue;
     if (!getInput<int>("value", increaseValue)) {
         throw BT::RuntimeError("Missing parameter [value] in IncreaseLinearActuatorAction");
     }
 
-    int newServoPose = 90;
+    int newServoPose = currentServoPose_ + 25;  
 
     std_msgs::Int32 increasedValue;
     increasedValue.data = newServoPose;
@@ -354,11 +382,10 @@ BT::NodeStatus IncreaseLinearActuatorAction::tick()
 
     blackboard_->set("servo_pose", newServoPose);
     std::this_thread::sleep_for(std::chrono::seconds(10));
-    std::cout << "LAC increase slept for 10s" << std::endl;
+    std::cout << "LAC increase slept for 10 seconds" << std::endl;
 
     return BT::NodeStatus::SUCCESS;
 }
-
 class ActiveAuto : public BT::SyncActionNode
 {
 public:
@@ -423,8 +450,6 @@ BT::NodeStatus ActivateStop::tick()
 }
 
 
-
-
 class ActivateReverse : public BT::SyncActionNode
 {
 public:
@@ -456,10 +481,14 @@ BT::PortsList ActivateReverse::providedPorts()
 
 BT::NodeStatus ActivateReverse::tick()
 {
-    counter_++; 
+    counter_++;
 
     std_msgs::Int32 activateMsg;
-    if (counter_ % 2 == 0)
+    if (counter_ % 6 == 0)
+    {
+        activateMsg.data = 0;
+    }
+    else if (counter_ % 2 == 0)
     {
         activateMsg.data = 1;
     }
@@ -467,18 +496,22 @@ BT::NodeStatus ActivateReverse::tick()
     {
         activateMsg.data = 2;
     }
-    
+
     activatePublisher_.publish(activateMsg);
     std::cout << "Published Auto Direction: " << static_cast<int>(activateMsg.data) << std::endl;
 
+    std::cout << "Counter count:" << counter_ << std::endl;
+
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
-    
     checkZValueNode_->reset();
     std::cout << "CheckZValuePositive60 node status reset." << std::endl;
 
     return BT::NodeStatus::SUCCESS;
 }
+
+
+
 class TurnOnMotorOpposite : public BT::SyncActionNode
 {
 public:
@@ -565,6 +598,23 @@ std::string getHomeDirectory() {
     return std::string(pw->pw_dir);
 }
 
+double imu_y = 60.0;  
+
+
+void imuAnglesCallback(const geometry_msgs::Vector3::ConstPtr& msg)
+{
+    imu_y = msg->y;
+}
+
+double user_defined_y = 40.0;
+
+void userDefinedYCallback(const std_msgs::Float64::ConstPtr& msg)
+{
+    user_defined_y = msg->data;
+}
+
+
+
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "behavior_tree_node");
@@ -618,6 +668,20 @@ int main(int argc, char** argv)
     int cycle2 = 0;
     int cnt = 0;
     int cnnnt = 0;
+
+     // Variable to store y value from /imu/angles topic
+    // double imu_y = 0.0;  // Initialize with zero value
+
+    // // Callback function to update imu_y
+    // auto imuAnglesCallback = [&](const geometry_msgs::Vector3::ConstPtr& msg)
+    // {
+    //     imu_y = msg->y;
+    // };
+
+    ros::Subscriber imuAnglesSubscriber = nh.subscribe("/imu/angles", 1, imuAnglesCallback);
+
+    ros::Subscriber userDefinedYSubscriber = nh.subscribe("/lateral_shift_stop_angle", 1, userDefinedYCallback);
+
     while (ros::ok())
     {
     if(cnnnt > 0)
@@ -635,7 +699,6 @@ int main(int argc, char** argv)
             <RetryUntilSuccessful num_attempts="10000">
                 <CheckZValuePositive60 min="60"/>
             </RetryUntilSuccessful>    
-                <Sleep duration="1"/>
                 <ActivateStop/>
                 <Sleep duration="5"/>
                 <ReduceLinearActuatorAction value="-25"/>
@@ -645,7 +708,7 @@ int main(int argc, char** argv)
                 <IncreaseLinearActuatorAction value="25"/>
                 <Sleep duration="5"/>
                 <ActivateReverse/>
-                <Sleep duration="5"/>
+                <Sleep duration="20"/>
             </Sequence>
         </BehaviorTree>
         </root>)";
@@ -657,7 +720,7 @@ int main(int argc, char** argv)
     ros::Rate rate(1);
     int tick_count = 0;
     int success_count = 0;
-    const int desired_success_count = 7;
+    const int desired_success_count = 6;
 
     while (success_count < desired_success_count)
     {
@@ -708,6 +771,24 @@ int main(int argc, char** argv)
     }
 
     ros::Duration(5.0).sleep();
+
+    //std_msgs::Int32 navigationControlMsg;
+    navigationControlMsg.data = 1;
+    activatePublisher.publish(navigationControlMsg);
+
+    while (ros::ok())
+        {
+            ros::spinOnce();  
+            ros::Duration(1.0).sleep();
+            if (imu_y >= user_defined_y && imu_y <= user_defined_y + 10)
+            {   std_msgs::Int32 navigationControlMsg;
+                navigationControlMsg.data = 0;
+                activatePublisher.publish(navigationControlMsg);
+                break;
+            }
+        }
+
+    
     
 
     int bash_script_result;
