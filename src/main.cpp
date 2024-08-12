@@ -14,9 +14,27 @@
 #include <chrono>
 #include <thread>
 #include <cstdlib>
+#include <csignal>
+#include <unistd.h>  // For getuid() and getpwuid()
+#include <pwd.h>
+#include <geometry_msgs/Vector3.h>
+#include <std_msgs/Float64.h>     // For getpwuid()
 
 
 using namespace std::chrono;
+
+std_msgs::Float32 positiveAngle; 
+std_msgs::Float32 negativeAngle; 
+
+void positiveAngleCallback(const std_msgs::Float32::ConstPtr& msg)
+{
+    positiveAngle = *msg;
+}
+
+void negativeAngleCallback(const std_msgs::Float32::ConstPtr& msg)
+{
+    negativeAngle = *msg;
+}
 
 class Sleep : public BT::SyncActionNode
 {
@@ -50,6 +68,7 @@ BT::NodeStatus Sleep::tick()
    return BT::NodeStatus::SUCCESS;
 }
 
+
 class CheckZValuePositive60 : public BT::ConditionNode
 {
 public:
@@ -64,12 +83,13 @@ private:
     ros::Subscriber zValueSubscriber_;
     double currentZValue_;
     BT::NodeStatus status_;
+    int counter_;
 
     void zValueCallback(const geometry_msgs::Vector3::ConstPtr& msg);
 };
 
 CheckZValuePositive60::CheckZValuePositive60(const std::string& name, const BT::NodeConfiguration& config)
-    : BT::ConditionNode(name, config), currentZValue_(0.0), status_(BT::NodeStatus::FAILURE)
+    : BT::ConditionNode(name, config), currentZValue_(0.0), status_(BT::NodeStatus::FAILURE), counter_(0)
 {
     zValueSubscriber_ = nh_.subscribe("/imu/angles", 1, &CheckZValuePositive60::zValueCallback, this);
 }
@@ -83,22 +103,33 @@ void CheckZValuePositive60::reset()
 {
     status_ = BT::NodeStatus::FAILURE;
     currentZValue_ = 0.0; 
+    counter_ = 1;
 }
 
 BT::NodeStatus CheckZValuePositive60::tick()
 {
-    double min;
-    if (!getInput<double>("min", min)) {
-        throw BT::RuntimeError("Missing parameter [min] in CheckZValuePositive60");
-    }
+    double minPositive = positiveAngle.data;
+    double minNegative = negativeAngle.data;
 
-    if ((currentZValue_ >= 60.0 && currentZValue_ <= 70.0) || (currentZValue_ >= 290.0 && currentZValue_ <= 300.0)) {
-        std::cout << "executed zed" << std::endl;
-        status_ = BT::NodeStatus::SUCCESS;
+    if (counter_ % 2 != 0) {
+        
+        if (currentZValue_ >= minPositive && currentZValue_ <= minPositive + 10.0) {
+            std::cout << "executed zed" << std::endl;
+            status_ = BT::NodeStatus::SUCCESS;
+        } else {
+            status_ = BT::NodeStatus::FAILURE;
+        }
     } else {
-        status_ = BT::NodeStatus::FAILURE;
+       
+        if (currentZValue_ >= minNegative && currentZValue_ <= minNegative + 10.0) {
+            std::cout << "executed zed" << std::endl;
+            status_ = BT::NodeStatus::SUCCESS;
+        } else {
+            status_ = BT::NodeStatus::FAILURE;
+        }
     }
 
+    counter_++;
     return status_;
 }
 
@@ -106,6 +137,7 @@ void CheckZValuePositive60::zValueCallback(const geometry_msgs::Vector3::ConstPt
 {
     currentZValue_ = msg->y;
 }
+
 class ReduceLinearActuatorAction : public BT::SyncActionNode
 {
 public:
@@ -114,15 +146,22 @@ public:
     virtual BT::NodeStatus tick() override;
 
 private:
+    void servoPoseCallback(const std_msgs::Int32::ConstPtr& msg);
+
     ros::Publisher servoPosePublisher_;
+    ros::Subscriber servoPoseSubscriber_;
     BT::Blackboard::Ptr blackboard_;
+    int currentServoPose_;  
 };
 
 ReduceLinearActuatorAction::ReduceLinearActuatorAction(const std::string& name, const BT::NodeConfiguration& config)
-    : BT::SyncActionNode(name, config)
+    : BT::SyncActionNode(name, config), currentServoPose_(0)  
 {
+    ros::NodeHandle nh;  
     servoPosePublisher_ = config.blackboard->template get<ros::Publisher>("servo_pose_publisher");
     blackboard_ = config.blackboard;
+    
+    servoPoseSubscriber_ = nh.subscribe("/current_servo_pose", 10, &ReduceLinearActuatorAction::servoPoseCallback, this);
 }
 
 BT::PortsList ReduceLinearActuatorAction::providedPorts()
@@ -130,21 +169,21 @@ BT::PortsList ReduceLinearActuatorAction::providedPorts()
     return { BT::InputPort<int>("value") };
 }
 
+void ReduceLinearActuatorAction::servoPoseCallback(const std_msgs::Int32::ConstPtr& msg)
+{
+    currentServoPose_ = msg->data;  
+}
+
 BT::NodeStatus ReduceLinearActuatorAction::tick()
 {
     std::cout << "Executing ReduceLinearActuatorAction" << std::endl;
-
-    int currentServoPose;
-    if (!blackboard_->get("servo_pose", currentServoPose)) {
-        throw BT::RuntimeError("Failed to get current servo_pose value");
-    }
 
     int reductionValue;
     if (!getInput<int>("value", reductionValue)) {
         throw BT::RuntimeError("Missing parameter [value] in ReduceLinearActuatorAction");
     }
 
-    int newServoPose = 65;
+    int newServoPose = currentServoPose_ - 25;  
 
     std_msgs::Int32 reducedValue;
     reducedValue.data = newServoPose;
@@ -156,7 +195,6 @@ BT::NodeStatus ReduceLinearActuatorAction::tick()
 
     return BT::NodeStatus::SUCCESS;
 }
-
 class TurnOnMotor : public BT::SyncActionNode
 {
 public:
@@ -299,15 +337,22 @@ public:
     virtual BT::NodeStatus tick() override;
 
 private:
+    void servoPoseCallback(const std_msgs::Int32::ConstPtr& msg);
+
     ros::Publisher servoPosePublisher_;
+    ros::Subscriber servoPoseSubscriber_;
     BT::Blackboard::Ptr blackboard_;
+    int currentServoPose_;  
 };
 
 IncreaseLinearActuatorAction::IncreaseLinearActuatorAction(const std::string& name, const BT::NodeConfiguration& config)
-    : BT::SyncActionNode(name, config)
+    : BT::SyncActionNode(name, config), currentServoPose_(0)  
 {
+    ros::NodeHandle nh;  
     servoPosePublisher_ = config.blackboard->template get<ros::Publisher>("servo_pose_publisher");
     blackboard_ = config.blackboard;
+   
+    servoPoseSubscriber_ = nh.subscribe("/current_servo_pose", 10, &IncreaseLinearActuatorAction::servoPoseCallback, this);
 }
 
 BT::PortsList IncreaseLinearActuatorAction::providedPorts()
@@ -315,21 +360,21 @@ BT::PortsList IncreaseLinearActuatorAction::providedPorts()
     return { BT::InputPort<int>("value") };
 }
 
+void IncreaseLinearActuatorAction::servoPoseCallback(const std_msgs::Int32::ConstPtr& msg)
+{
+    currentServoPose_ = msg->data; 
+}
+
 BT::NodeStatus IncreaseLinearActuatorAction::tick()
 {
     std::cout << "Executing IncreaseLinearActuatorAction" << std::endl;
-
-    int currentServoPose;
-    if (!blackboard_->get("servo_pose", currentServoPose)) {
-        throw BT::RuntimeError("Failed to get current servo_pose value");
-    }
 
     int increaseValue;
     if (!getInput<int>("value", increaseValue)) {
         throw BT::RuntimeError("Missing parameter [value] in IncreaseLinearActuatorAction");
     }
 
-    int newServoPose = 90;
+    int newServoPose = currentServoPose_ + 25;  
 
     std_msgs::Int32 increasedValue;
     increasedValue.data = newServoPose;
@@ -337,11 +382,10 @@ BT::NodeStatus IncreaseLinearActuatorAction::tick()
 
     blackboard_->set("servo_pose", newServoPose);
     std::this_thread::sleep_for(std::chrono::seconds(10));
-    std::cout << "LAC increase slept for 10s" << std::endl;
+    std::cout << "LAC increase slept for 10 seconds" << std::endl;
 
     return BT::NodeStatus::SUCCESS;
 }
-
 class ActiveAuto : public BT::SyncActionNode
 {
 public:
@@ -406,8 +450,6 @@ BT::NodeStatus ActivateStop::tick()
 }
 
 
-
-
 class ActivateReverse : public BT::SyncActionNode
 {
 public:
@@ -439,10 +481,14 @@ BT::PortsList ActivateReverse::providedPorts()
 
 BT::NodeStatus ActivateReverse::tick()
 {
-    counter_++; 
+    counter_++;
 
     std_msgs::Int32 activateMsg;
-    if (counter_ % 2 == 0)
+    if (counter_ % 6 == 0)
+    {
+        activateMsg.data = 0;
+    }
+    else if (counter_ % 2 == 0)
     {
         activateMsg.data = 1;
     }
@@ -450,18 +496,22 @@ BT::NodeStatus ActivateReverse::tick()
     {
         activateMsg.data = 2;
     }
-    
+
     activatePublisher_.publish(activateMsg);
     std::cout << "Published Auto Direction: " << static_cast<int>(activateMsg.data) << std::endl;
 
+    std::cout << "Counter count:" << counter_ << std::endl;
+
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
-    
     checkZValueNode_->reset();
     std::cout << "CheckZValuePositive60 node status reset." << std::endl;
 
     return BT::NodeStatus::SUCCESS;
 }
+
+
+
 class TurnOnMotorOpposite : public BT::SyncActionNode
 {
 public:
@@ -513,14 +563,64 @@ void wireValueCallback(const std_msgs::Float32::ConstPtr& msg)
         std_msgs::Int8 motorDirectionMsg;
         motorDirectionMsg.data = 0;
         motorDirectionPublisher.publish(motorDirectionMsg);
-        ros::spinOnce();
+        //ros::spinOnce();
     }
 }
+
+void signal_handler(int signal) 
+{
+    if (signal == SIGABRT)
+        std::cerr << "SIGABRT received\n";
+    else
+        std::cerr << "Unexpected signal " << signal << " received\n";
+    std::_Exit(EXIT_FAILURE);
+}
+
+
+bool terminateCallback(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res)
+{
+    res.success = true;
+    auto previous_handler = std::signal(SIGABRT, signal_handler);
+    if (previous_handler == SIG_ERR)
+    {
+        std::cerr << "Setup failed\n";
+        return EXIT_FAILURE;
+    }
+ 
+    std::abort(); // Raise SIGABRT
+    std::cout << "This code is unreachable\n"; 
+    return true;
+    
+}
+
+std::string getHomeDirectory() {
+    struct passwd *pw = getpwuid(getuid());
+    return std::string(pw->pw_dir);
+}
+
+double imu_y = 60.0;  
+
+
+void imuAnglesCallback(const geometry_msgs::Vector3::ConstPtr& msg)
+{
+    imu_y = msg->y;
+}
+
+double user_defined_y = 40.0;
+
+void userDefinedYCallback(const std_msgs::Float64::ConstPtr& msg)
+{
+    user_defined_y = msg->data;
+}
+
+
 
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "behavior_tree_node");
     ros::NodeHandle nh;
+    ros::AsyncSpinner spinner(1);
+    spinner.start();
 
     BT::BehaviorTreeFactory factory;
     factory.registerNodeType<CheckZValuePositive60>("CheckZValuePositive60");
@@ -534,12 +634,22 @@ int main(int argc, char** argv)
     factory.registerNodeType<ActivateReverse>("ActivateReverse");
     factory.registerNodeType<Sleep>("Sleep");
 
+
+    positiveAngle.data = 60.0;
+    negativeAngle.data = 290.0;
+    
+    ros::Subscriber positiveAngleSubscriber = nh.subscribe("positive_angle", 10, positiveAngleCallback);
+    ros::Subscriber negativeAngleSubscriber = nh.subscribe("negative_angle", 10, negativeAngleCallback);
+    // ros::Publisher positiveAnglePublisher = nh.advertise<std_msgs::Float32>("positive_angle", 1);
+    // ros::Publisher negativeAnglePublisher = nh.advertise<std_msgs::Float32>("negative_angle", 1);
+
     ros::Publisher servoPosePublisher = nh.advertise<std_msgs::Int32>("servo_pose", 1);
     motorDirectionPublisher = nh.advertise<std_msgs::Int8>("motor_direction", 1);
     servoPosePublisher = nh.advertise<std_msgs::Int32>("servo_pose", 1);
     ros::Publisher wireValuePublisher = nh.advertise<std_msgs::Float32>("wire_value", 1);
     ros::Publisher activatePublisher = nh.advertise<std_msgs::Int32>("navigation_control", 1);
     ros::Publisher lateralShiftPublisher = nh.advertise<std_msgs::Int32>("/lateral_shift", 1);
+    ros::ServiceServer terminateService = nh.advertiseService("terminate_program", terminateCallback);
 
     BT::Blackboard::Ptr blackboard = BT::Blackboard::create();
     blackboard->set("servo_pose_publisher", servoPosePublisher);
@@ -547,45 +657,75 @@ int main(int argc, char** argv)
     blackboard->set("motor_direction_publisher", motorDirectionPublisher);
     blackboard->set("navigation_control", activatePublisher);
 
+    // std_msgs::Float32 positiveAngleControlMsg;
+    // positiveAngleControlMsg.data = 60;
+    // positiveAnglePublisher.publish(positiveAngleControlMsg);
+
+    // std_msgs::Float32 negativeAngleControlMsg;
+    // negativeAngleControlMsg.data = 290;
+    // negativeAnglePublisher.publish(negativeAngleControlMsg);
+
     int cycle1 = 0;
     int cycle2 = 0;
+    int cnt = 0;
+    int cnnnt = 0;
 
-     std::string xml_text = R"(
-                    <root BTCPP_format="3">
-                    <BehaviorTree ID="ReactiveBehaviorTree">
-                        <Sequence>
-                        <RetryUntilSuccessful num_attempts="10000">
-                            <CheckZValuePositive60 min="60"/>
-                        </RetryUntilSuccessful>    
-                            <Sleep duration="1"/>
-                            <ActivateStop/>
-                            <Sleep duration="5"/>
-                            <ReduceLinearActuatorAction value="-25"/>
-                            <Sleep duration="5"/>
-                            <TurnOnMotor/>
-                            <Sleep duration="5"/>
-                            <IncreaseLinearActuatorAction value="25"/>
-                            <Sleep duration="5"/>
-                            <ActivateReverse/>
-                            <Sleep duration="5"/>
-                        </Sequence>
-                    </BehaviorTree>
-                    </root>)";
+     // Variable to store y value from /imu/angles topic
+    // double imu_y = 0.0;  // Initialize with zero value
 
-    std::cout << "Loaded XML:\n"
-                  << xml_text << std::endl;
+    // // Callback function to update imu_y
+    // auto imuAnglesCallback = [&](const geometry_msgs::Vector3::ConstPtr& msg)
+    // {
+    //     imu_y = msg->y;
+    // };
+
+    ros::Subscriber imuAnglesSubscriber = nh.subscribe("/imu/angles", 1, imuAnglesCallback);
+
+    ros::Subscriber userDefinedYSubscriber = nh.subscribe("/lateral_shift_stop_angle", 1, userDefinedYCallback);
+
+    while (ros::ok())
+    {
+    if(cnnnt > 0)
+    {
+    std_msgs::Int32 navigationControlMsg;
+    navigationControlMsg.data = 1;
+    activatePublisher.publish(navigationControlMsg);
+    }
+    ros::Duration(5.0).sleep();
+    
+    std::string xml_text = R"(
+        <root BTCPP_format="3">
+        <BehaviorTree ID="ReactiveBehaviorTree">
+            <Sequence>
+            <RetryUntilSuccessful num_attempts="10000">
+                <CheckZValuePositive60 min="60"/>
+            </RetryUntilSuccessful>    
+                <ActivateStop/>
+                <Sleep duration="1"/>
+                <ReduceLinearActuatorAction value="-25"/>
+                <Sleep duration="1"/>
+                <TurnOnMotor/>
+                <Sleep duration="1"/>
+                <IncreaseLinearActuatorAction value="25"/>
+                <Sleep duration="1"/>
+                <ActivateReverse/>
+                <Sleep duration="1"/>
+            </Sequence>
+        </BehaviorTree>
+        </root>)";
+
+    std::cout << "Loaded XML:\n" << xml_text << std::endl;
 
     auto tree = factory.createTreeFromText(xml_text, blackboard);
 
     ros::Rate rate(1);
     int tick_count = 0;
     int success_count = 0;
-    const int desired_success_count = 6;
+    const int desired_success_count = 1;
 
     while (success_count < desired_success_count)
     {
         BT::NodeStatus status = tree.tickRoot();
-        ros::spinOnce();
         rate.sleep();
         tick_count++;
 
@@ -596,74 +736,120 @@ int main(int argc, char** argv)
             success_count++;
             tree.rootNode()->halt();
         }
-
         
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
     std::cout << "Behavior Tree execution completed after " << tick_count << " cycles." << std::endl;
 
-    
-
-    ros::Duration(1.0).sleep();
+    ros::Duration(5.0).sleep();
 
     ros::Subscriber wireValueSub = nh.subscribe("/wire_value", 1, wireValueCallback);
 
-    
     std_msgs::Int32 navigationControlMsg;
     navigationControlMsg.data = 0;
     activatePublisher.publish(navigationControlMsg);
 
     ros::Duration(1.0).sleep();
     std_msgs::Int32 servoPoseMsg;
-    servoPoseMsg.data = 65;
-    servoPosePublisher.publish(servoPoseMsg);
+     ros::Subscriber servoPoseSubscriber = nh.subscribe<std_msgs::Int32>("/current_servo_pose", 10,
+        [&](const std_msgs::Int32::ConstPtr& msg)
+        {
+            
+            servoPoseMsg.data = msg->data - 25;
+
+            
+            servoPosePublisher.publish(servoPoseMsg);
+
+            
+            servoPoseSubscriber.shutdown();
+        });
     ros::Duration(5.0).sleep();
+
+    while (ros::ok())
+        {
+            ros::spinOnce();  
+            ros::Duration(1.0).sleep();
+            if (imu_y >= positiveAngle.data && imu_y <= positiveAngle.data + 10)
+            {   std_msgs::Int32 navigationControlMsg;
+                navigationControlMsg.data = 0;
+                activatePublisher.publish(navigationControlMsg);
+                break;
+            }
+        }
 
     std_msgs::Int8 motorDirectionMsg;
     motorDirectionMsg.data = 2;
     motorDirectionPublisher.publish(motorDirectionMsg);
-    ros::spinOnce();
     ros::Duration(1.0).sleep();
 
     while (ros::ok()) {
-        ros::spinOnce();
         ros::Duration(1.0).sleep();
 
         if (wireValueMsg.data < 0.022) {
             motorDirectionMsg.data = 0;
             motorDirectionPublisher.publish(motorDirectionMsg);
-            ros::spinOnce();
             break;
         }
     }
 
     ros::Duration(5.0).sleep();
-    int cnt = 0;
 
-    //int bash_script_result = std::system("./lateral_shift.sh");
+    //std_msgs::Int32 navigationControlMsg;
+    navigationControlMsg.data = 1;
+    activatePublisher.publish(navigationControlMsg);
+
+    while (ros::ok())
+        {
+            ros::spinOnce();  
+            ros::Duration(1.0).sleep();
+            if (imu_y >= user_defined_y && imu_y <= user_defined_y + 10)
+            {   std_msgs::Int32 navigationControlMsg;
+                navigationControlMsg.data = 0;
+                activatePublisher.publish(navigationControlMsg);
+                break;
+            }
+        }
+
+    
+    
+
     int bash_script_result;
+    std::string homeDirectory;
+    std::string scriptPath;
 
     if (cnt == 0) {
-        bash_script_result = std::system("./lateral_shift.sh");
+        homeDirectory = getHomeDirectory();
+        scriptPath = homeDirectory + "/lateral_shift.sh";
+
+        //bash_script_result = std::system(scriptPath.c_str());
+
+        system("bash ~/lateral_shift.sh &");
 
         ros::Duration(5.0).sleep();
 
         std_msgs::Int32 lateralShiftMsg;
         lateralShiftMsg.data = 1;
+        std::cout << "Publishing lateral shift message with data: " << lateralShiftMsg.data << std::endl;
         lateralShiftPublisher.publish(lateralShiftMsg);
 
-        ros::Duration(50.0).sleep();
+        ros::Duration(5.0).sleep();
 
         std::system("rosnode kill lateral_shift_controller");
         
     } else {
-        bash_script_result = std::system("./lateral_shift.sh");
+        homeDirectory = getHomeDirectory();
+        scriptPath = homeDirectory + "/lateral_shift.sh";
+
+        //bash_script_result = std::system(scriptPath.c_str());
+
+        system("bash ~/lateral_shift.sh &");
 
         ros::Duration(5.0).sleep();
 
         std_msgs::Int32 lateralShiftMsg;
         lateralShiftMsg.data = 1;
+        std::cout << "Publishing lateral shift message with data: " << lateralShiftMsg.data << std::endl;
         lateralShiftPublisher.publish(lateralShiftMsg);
 
         ros::Duration(2.0).sleep();
@@ -672,12 +858,16 @@ int main(int argc, char** argv)
 
         ros::Duration(3.0).sleep();
 
-        int bash_script_result = std::system("./lateral_shift.sh");
+        scriptPath = homeDirectory + "/lateral_shift.sh";
 
-        ros::Duration(2.0).sleep();
+        //bash_script_result = std::system(scriptPath.c_str());
 
-        //std_msgs::Int32 lateralShiftMsg;
+        system("bash ~/lateral_shift.sh &");
+
+        ros::Duration(5.0).sleep();
+
         lateralShiftMsg.data = 1;
+        std::cout << "Publishing lateral shift message with data: " << lateralShiftMsg.data << std::endl;
         lateralShiftPublisher.publish(lateralShiftMsg);
 
         ros::Duration(50.0).sleep();
@@ -685,7 +875,23 @@ int main(int argc, char** argv)
         std::system("rosnode kill lateral_shift_controller");
     }
     cnt++;
+    cnnnt++;
+    //std_msgs::Int32 servoPoseMsg;
+     ros::Subscriber servoPoseSubscriber_ = nh.subscribe<std_msgs::Int32>("/current_servo_pose", 10,
+        [&](const std_msgs::Int32::ConstPtr& msg)
+        {
+            
+            servoPoseMsg.data = msg->data + 25;
 
+            
+            servoPosePublisher.publish(servoPoseMsg);
 
+            
+            servoPoseSubscriber_.shutdown();
+        });
+    ros::Duration(5.0).sleep();
+    }
+    spinner.stop();
+    ros::shutdown();
     return 0;
 }
